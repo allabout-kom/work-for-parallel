@@ -2,7 +2,7 @@
 using namespace std;
 #define maxN 10000000//10 billion
 int a[maxN];
-int sum=0;
+long long sum=0;
 
 int main()
 {

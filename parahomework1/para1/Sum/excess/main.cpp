@@ -2,7 +2,7 @@
 using namespace std;
 #define maxN 10000000
 int a[maxN];
-int sum,sum1=0,sum2=0;
+long long sum,sum1=0,sum2=0;
 
 int main()
 {
