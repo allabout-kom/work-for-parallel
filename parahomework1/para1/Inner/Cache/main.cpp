@@ -21,9 +21,9 @@ int main()
 
     for(int i=0;i<n;i++)
         sum[i]=0;
-//differences:mainly decided by columns
+
     for(int j=0;j<n;j++){
-        for(int i=0;i<n;i++)
+        for(int i=0;i<n;i++)//by tuples
         {
             sum[i]+=a[j]*b[j][i];
         }

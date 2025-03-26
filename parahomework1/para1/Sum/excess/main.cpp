@@ -16,8 +16,10 @@ int main()
     while(t--){
         for(int i=0;i<maxN;i+=2){
             sum1+=a[i];
+            if(maxN>i+1)
             sum2+=a[i+1];
         }
+
     }
     sum=sum1+sum2;
 
