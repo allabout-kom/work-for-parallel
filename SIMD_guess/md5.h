@@ -2,8 +2,6 @@
 #include <string>
 #include <cstring>
 #include <vector>
-//#include <arm64_neon.h>
-#include <arm_neon.h>
 
 
 using namespace std;
@@ -38,9 +36,9 @@ typedef unsigned int bit32;
  *
  * @return one bit32.
  */
-// 定义了一系列MD5中的具体函数
-// 这四个计算函数是需要你进行SIMD并行化的
-// 可以看到，FGHI四个函数都涉及一系列位运算，在数据上是对齐的，非常容易实现SIMD的并行化
+ // 定义了一系列MD5中的具体函数
+ // 这四个计算函数是需要你进行SIMD并行化的
+ // 可以看到，FGHI四个函数都涉及一系列位运算，在数据上是对齐的，非常容易实现SIMD的并行化
 
 #define F(x, y, z) (((x) & (y)) | ((~x) & (z)))
 #define G(x, y, z) (((x) & (z)) | ((y) & (~z)))
@@ -56,9 +54,9 @@ typedef unsigned int bit32;
  *
  * @return the number after rotated left.
  */
-// 定义了一系列MD5中的具体函数
-// 这五个计算函数（ROTATELEFT/FF/GG/HH/II）和之前的FGHI一样，都是需要你进行SIMD并行化的
-// 但是你需要注意的是#define的功能及其效果，可以发现这里的FGHI是没有返回值的，为什么呢？你可以查询#define的含义和用法
+ // 定义了一系列MD5中的具体函数
+ // 这五个计算函数（ROTATELEFT/FF/GG/HH/II）和之前的FGHI一样，都是需要你进行SIMD并行化的
+ // 但是你需要注意的是#define的功能及其效果，可以发现这里的FGHI是没有返回值的，为什么呢？你可以查询#define的含义和用法
 #define ROTATELEFT(num, n) (((num) << (n)) | ((num) >> (32-(n))))
 
 #define FF(a, b, c, d, x, s, ac) { \
@@ -83,68 +81,77 @@ typedef unsigned int bit32;
   (a) += (b); \
 }
 
-void MD5Hash(string input, bit32 *state);
-#include <arm_neon.h>
-//void SIMD_MD5(vector<string>& inputs, const int num_inputs, bit32 **states);
-void SIMD_MD5o(vector<string>& inputs, const int inputs_n, bit32 **states,int si);
+#include <emmintrin.h>  // SSE2
+#include <tmmintrin.h>  // SSSE3
 
-// SIMD版 F(x, y, z) = (x & y) | ((~x) & z)
-inline uint32x4_t F_SIMD(uint32x4_t x, uint32x4_t y, uint32x4_t z) {
-  return vorrq_u32(vandq_u32(x, y), vandq_u32(vmvnq_u32(x), z)); 
+typedef __m128i bit128; // 用来替代 uint32x4_t
+
+
+// SSE版 F(x, y, z) = (x & y) | ((~x) & z)
+inline bit128 F_SIMD(bit128 x, bit128 y, bit128 z) {
+  return _mm_or_si128(_mm_and_si128(x, y), _mm_and_si128(_mm_andnot_si128(x, _mm_set1_epi32(-1)), z));
 }
 
-// G(x, y, z) = ((x) & (z)) | ((y) & (~z))
-inline uint32x4_t G_SIMD(uint32x4_t x, uint32x4_t y, uint32x4_t z) {
-  return vorrq_u32(vandq_u32(x, z), vandq_u32(y, vmvnq_u32(z))); 
+// SSE版 G(x, y, z) = (x & z) | (y & (~z))
+inline bit128 G_SIMD(bit128 x, bit128 y, bit128 z) {
+  return _mm_or_si128(_mm_and_si128(x, z), _mm_and_si128(y, _mm_andnot_si128(z, _mm_set1_epi32(-1))));
 }
 
-// H(x, y, z) = (x) ^ (y) ^ (z)
-inline uint32x4_t H_SIMD(uint32x4_t x, uint32x4_t y, uint32x4_t z) {
-  return veorq_u32(veorq_u32(x, y), z); 
+// SSE版 H(x, y, z) = x ^ y ^ z
+inline bit128 H_SIMD(bit128 x, bit128 y, bit128 z) {
+  return _mm_xor_si128(_mm_xor_si128(x, y), z);
 }
 
-// I(x, y, z) = (y) ^ ((x) | (~z))
-inline uint32x4_t I_SIMD(uint32x4_t x, uint32x4_t y, uint32x4_t z) {
-  return veorq_u32(y, vorrq_u32(x, vmvnq_u32(z)));
+// SSE版 I(x, y, z) = y ^ (x | (~z))
+inline bit128 I_SIMD(bit128 x, bit128 y, bit128 z) {
+  return _mm_xor_si128(y, _mm_or_si128(x, _mm_andnot_si128(z, _mm_set1_epi32(-1))));
 }
 
-// NEON SIMD 左循环移位函数：对4个uint32并行执行
-#define ROTATELEFT_SIMD(num, n) \
-  vorrq_u32(vshlq_n_u32(num, n), vshrq_n_u32(num, 32 - n)) 
+// SSE 左循环移位
+inline bit128 ROTATELEFT_SIMD(bit128 num, int n) {
+  return _mm_or_si128(_mm_slli_epi32(num, n), _mm_srli_epi32(num, 32 - n));
+}
 
-// NEON版本的F/G/H/I轮函数宏定义
+// F轮
 #define FF_SIMD(a, b, c, d, x, s, ac) { \
-  uint32x4_t tmp = F_SIMD(b, c, d); \
-  tmp = vaddq_u32(tmp, x); \
-  tmp = vaddq_u32(tmp, vdupq_n_u32(ac)); \
-  a = vaddq_u32(a, tmp); \
+  bit128 tmp = F_SIMD(b, c, d); \
+  tmp = _mm_add_epi32(tmp, x); \
+  tmp = _mm_add_epi32(tmp, _mm_set1_epi32(ac)); \
+  a = _mm_add_epi32(a, tmp); \
   a = ROTATELEFT_SIMD(a, s); \
-  a = vaddq_u32(a, b); \
-} 
+  a = _mm_add_epi32(a, b); \
+}
 
+// G轮
 #define GG_SIMD(a, b, c, d, x, s, ac) { \
-  uint32x4_t tmp = G_SIMD(b, c, d); \
-  tmp = vaddq_u32(tmp, x); \
-  tmp = vaddq_u32(tmp, vdupq_n_u32(ac)); \
-  a = vaddq_u32(a, tmp); \
+  bit128 tmp = G_SIMD(b, c, d); \
+  tmp = _mm_add_epi32(tmp, x); \
+  tmp = _mm_add_epi32(tmp, _mm_set1_epi32(ac)); \
+  a = _mm_add_epi32(a, tmp); \
   a = ROTATELEFT_SIMD(a, s); \
-  a = vaddq_u32(a, b); \
-} 
+  a = _mm_add_epi32(a, b); \
+}
 
+// H轮
 #define HH_SIMD(a, b, c, d, x, s, ac) { \
-  uint32x4_t tmp = H_SIMD(b, c, d); \
-  tmp = vaddq_u32(tmp, x); \
-  tmp = vaddq_u32(tmp, vdupq_n_u32(ac)); \
-  a = vaddq_u32(a, tmp); \
+  bit128 tmp = H_SIMD(b, c, d); \
+  tmp = _mm_add_epi32(tmp, x); \
+  tmp = _mm_add_epi32(tmp, _mm_set1_epi32(ac)); \
+  a = _mm_add_epi32(a, tmp); \
   a = ROTATELEFT_SIMD(a, s); \
-  a = vaddq_u32(a, b); \
-} 
+  a = _mm_add_epi32(a, b); \
+}
 
+// I轮
 #define II_SIMD(a, b, c, d, x, s, ac) { \
-  uint32x4_t tmp = I_SIMD(b, c, d); \
-  tmp = vaddq_u32(tmp, x); \
-  tmp = vaddq_u32(tmp, vdupq_n_u32(ac)); \
-  a = vaddq_u32(a, tmp); \
+  bit128 tmp = I_SIMD(b, c, d); \
+  tmp = _mm_add_epi32(tmp, x); \
+  tmp = _mm_add_epi32(tmp, _mm_set1_epi32(ac)); \
+  a = _mm_add_epi32(a, tmp); \
   a = ROTATELEFT_SIMD(a, s); \
-  a = vaddq_u32(a, b); \
-} 
+  a = _mm_add_epi32(a, b); \
+}
+
+
+void SIMD_MD5o(vector<string>& inputs, const int inputs_n, bit32** states, int si);
+void MD5Hash(string input, bit32* state);

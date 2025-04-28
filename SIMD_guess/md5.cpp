@@ -4,6 +4,11 @@
 #include <chrono>
 #include<algorithm>
 #include <cmath>
+#include <malloc.h>
+#include <vector>
+#include <emmintrin.h>  // SSE2指令集头文件，里面有128bit的操作
+#include <emmintrin.h>  // SSE2
+#include <tmmintrin.h>  // SSSE3 (for _mm_shuffle_epi8)
 
 using namespace std;
 using namespace chrono;
@@ -14,10 +19,10 @@ using namespace chrono;
  * @param[out] n_byte 用于给调用者传递额外的返回值，即最终Byte数组的长度
  * @return Byte消息数组
  */
-Byte *StringProcess(string input, int *n_byte)
+Byte* StringProcess(string input, int* n_byte)
 {
 	// 将输入的字符串转换为Byte为单位的数组
-	Byte *blocks = (Byte *)input.c_str();
+	Byte* blocks = (Byte*)input.c_str();
 	int length = input.length();
 
 	// 计算原始消息长度（以比特为单位）
@@ -48,7 +53,7 @@ Byte *StringProcess(string input, int *n_byte)
 	// // 2. paddingBytes为原始消息需要的padding长度（Bytes）
 	// // 3. 在pad到length%512==448之后，需要额外附加64bits的原始消息长度，即8个bytes
 	int paddedLength = length + paddingBytes + 8;
-	Byte *paddedMessage = new Byte[paddedLength];
+	Byte* paddedMessage = new Byte[paddedLength];
 
 	// 复制原始消息
 	memcpy(paddedMessage, blocks, length);
@@ -74,11 +79,11 @@ Byte *StringProcess(string input, int *n_byte)
 	*n_byte = paddedLength;
 	return paddedMessage;
 }
-void MD5Hash(string input, bit32 *state)
+void MD5Hash(string input, bit32* state)
 {
-
-	Byte *paddedMessage;
-	int *messageLength = new int[1];
+	//cout<<"aaaaa"<<endl;
+	Byte* paddedMessage;
+	int* messageLength = new int[1];
 	for (int i = 0; i < 1; i += 1)
 	{
 		paddedMessage = StringProcess(input, &messageLength[i]);
@@ -102,9 +107,9 @@ void MD5Hash(string input, bit32 *state)
 		for (int i1 = 0; i1 < 16; ++i1)
 		{
 			x[i1] = (paddedMessage[4 * i1 + i * 64]) |
-					(paddedMessage[4 * i1 + 1 + i * 64] << 8) |
-					(paddedMessage[4 * i1 + 2 + i * 64] << 16) |
-					(paddedMessage[4 * i1 + 3 + i * 64] << 24);
+				(paddedMessage[4 * i1 + 1 + i * 64] << 8) |
+				(paddedMessage[4 * i1 + 2 + i * 64] << 16) |
+				(paddedMessage[4 * i1 + 3 + i * 64] << 24);
 		}
 
 		bit32 a = state[0], b = state[1], c = state[2], d = state[3];
@@ -193,9 +198,9 @@ void MD5Hash(string input, bit32 *state)
 	{
 		uint32_t value = state[i];
 		state[i] = ((value & 0xff) << 24) |		 // 将最低字节移到最高位
-				   ((value & 0xff00) << 8) |	 // 将次低字节左移
-				   ((value & 0xff0000) >> 8) |	 // 将次高字节右移
-				   ((value & 0xff000000) >> 24); // 将最高字节移到最低位
+			((value & 0xff00) << 8) |	 // 将次低字节左移
+			((value & 0xff0000) >> 8) |	 // 将次高字节右移
+			((value & 0xff000000) >> 24); // 将最高字节移到最低位
 	}
 
 	// 输出最终的hash结果
@@ -219,84 +224,86 @@ void MD5Hash(string input, bit32 *state)
  */
 
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void SIMD_MD5o(vector<string>& inputs, const int inputs_n, bit32 **states,int si) {
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+void SIMD_MD5o(vector<string>& inputs, const int inputs_n, bit32** states, int si) {
 	// NEON一次处理4个数据,所以向上对齐到4的倍数
-   int n=ceil(inputs_n/4.0)*4;//是4.0而不是4
-   
-   // 初始化数据结构
-   vector<unique_ptr<Byte[]>> paddedMessages(inputs_n);
-   vector<int> paddedLength(inputs_n);//每个的长度的数组
-   vector<int> n_blocks(inputs_n);
-   vector<bit32> x(n * 16, 0);
-   
-   // 预处理输入
-   #pragma omp parallel for
-   for (int j = 0; j < inputs_n; ++j) {
-	   paddedMessages[j].reset(StringProcess(inputs[j+si], &paddedLength[j]));
-	   n_blocks[j] = paddedLength[j] /64;
-   }
-   
-   // 对齐内存分配
-   bit32* state0 = (bit32*)aligned_alloc(16,n * sizeof(bit32));
-   bit32* state1 = (bit32*)aligned_alloc(16, n * sizeof(bit32));
-   bit32* state2 = (bit32*)aligned_alloc(16, n * sizeof(bit32));
-   bit32* state3 = (bit32*)aligned_alloc(16,n * sizeof(bit32));
-   
-   // 初始化state,并行化。一次弄四个，反正n是4的倍数。
-   //预先生成好常量向量。
-	 const uint32x4_t state0_vals = vdupq_n_u32(0x67452301);
-	 const uint32x4_t state1_vals = vdupq_n_u32(0xefcdab89);
-	 const uint32x4_t state2_vals = vdupq_n_u32(0x98badcfe);
-	 const uint32x4_t state3_vals = vdupq_n_u32(0x10325476);
+	int n = ceil(inputs_n / 4.0) * 4;//谁在意它input是几
+	//cout<<"开头是"<<inputs[0]<<"   "<<n<<endl;
+	// 初始化数据结构
+	vector<unique_ptr<Byte[]>> paddedMessages(inputs_n);
+	vector<int> paddedLength(inputs_n);//每个的长度的数组
+	vector<int> n_blocks(inputs_n);
+	vector<bit32> x(n * 16, 0);
 
-	 // 可以加OpenMP
-	 #pragma omp parallel for
-	 for (int i = 0; i < n; i += 4) {
-		 vst1q_u32(state0 + i, state0_vals);
-		 vst1q_u32(state1 + i, state1_vals);
-		 vst1q_u32(state2 + i, state2_vals);
-		 vst1q_u32(state3 + i, state3_vals);
-	 }
+	// 预处理输入
+#pragma omp parallel for
+	for (int j = 0; j < inputs_n; ++j) {
+		paddedMessages[j].reset(StringProcess(inputs[j + si], &paddedLength[j]));
+		n_blocks[j] = paddedLength[j] / 64;
+	}
+	//cout<<"n_blocks: "<<n_blocks[0]<<endl;
+	// 对齐内存分配
+	bit32* state0 = (bit32*)_aligned_malloc(n * sizeof(bit32), 16);
+	bit32* state1 = (bit32*)_aligned_malloc(n * sizeof(bit32), 16);
+	bit32* state2 = (bit32*)_aligned_malloc(n * sizeof(bit32), 16);
+	bit32* state3 = (bit32*)_aligned_malloc(n * sizeof(bit32), 16);
 
-   
-   int max_n_blocks = *max_element(n_blocks.begin(), n_blocks.end());
-   // 主处理循环,和串行的那个一样
-   for (int i = 0; i <max_n_blocks; i++) {
-	   // 加载当前块的数据
-	   for (int j = 0; j < inputs_n; j++) {
-		   if (i >= n_blocks[j]) //比当前的块大
-					   continue;
-				   //和上面一样的处理
-				 for (int k = 0; k < 16; k++) {
-						  size_t msg_offset = i * 64 + k * 4;
-						  size_t x_offset = k * 4 + j;
-						  x[x_offset] = (
-							 paddedMessages[j][msg_offset] |
-							 (paddedMessages[j][msg_offset + 1] << 8) |
-							 (paddedMessages[j][msg_offset + 2] << 16) |
-							 (paddedMessages[j][msg_offset + 3] << 24)
-						  );
-		   }
-	   }
+	// 初始化state,并行化。一次弄四个，反正n是4的倍数
+	// 预先生成好常量向量
+	// 预先生成好常量向量
+	const __m128i state0_vals = _mm_set1_epi32(0x67452301);
+	const __m128i state1_vals = _mm_set1_epi32(0xefcdab89);
+	const __m128i state2_vals = _mm_set1_epi32(0x98badcfe);
+	const __m128i state3_vals = _mm_set1_epi32(0x10325476);
 
-	   // NEON SIMD处理,每次处理4个input，+=4
-	   for (int j = 0; j < n; j += 4) {
-		   uint32x4_t x_vec[16];
-		   // 加载x数据
-		   for (int k = 0; k < 16; ++k) {
-			   x_vec[k] = vld1q_u32(&x[k *  n  + j]);
-		   }
+#pragma omp parallel for
+	for (int i = 0; i < n; i += 4) {
+		_mm_store_si128((__m128i*)(state0 + i), state0_vals);
+		_mm_store_si128((__m128i*)(state1 + i), state1_vals);
+		_mm_store_si128((__m128i*)(state2 + i), state2_vals);
+		_mm_store_si128((__m128i*)(state3 + i), state3_vals);
+	}
 
-		   // 加载state
-		   uint32x4_t a = vld1q_u32(state0 + j);
-		   uint32x4_t b = vld1q_u32(state1 + j);
-		   uint32x4_t c = vld1q_u32(state2 + j);
-		   uint32x4_t d = vld1q_u32(state3 + j);
 
-		   uint32x4_t aa = a, bb = b, cc = c, dd = d;
-				//和上面一样
-				auto start = system_clock::now();
+	int max_n_blocks = *max_element(n_blocks.begin(), n_blocks.end());
+	// 主处理循环,和串行的那个一样
+	for (int i = 0; i < max_n_blocks; i++) {
+		// 加载当前块的数据
+		for (int j = 0; j < inputs_n; j++) {
+			if (i >= n_blocks[j]) //比当前的块大
+				continue;
+			//和上面一样的处理
+			for (int k = 0; k < 16; k++) {
+				size_t msg_offset = i * 64 + k * 4;
+				size_t x_offset = k * 4 + j;
+				x[x_offset] = (
+					paddedMessages[j][msg_offset] |
+					(paddedMessages[j][msg_offset + 1] << 8) |
+					(paddedMessages[j][msg_offset + 2] << 16) |
+					(paddedMessages[j][msg_offset + 3] << 24)
+					);
+
+			}
+		}
+
+		// NEON SIMD处理,每次处理4个input，+=4
+
+		for (int j = 0; j < n; j += 4) {
+			__m128i x_vec[16];
+			for (int k = 0; k < 16; ++k) {
+				x_vec[k] = _mm_load_si128((__m128i*)(&x[k * n + j]));
+			}
+
+			__m128i a = _mm_load_si128((__m128i*)(state0 + j));
+			__m128i b = _mm_load_si128((__m128i*)(state1 + j));
+			__m128i c = _mm_load_si128((__m128i*)(state2 + j));
+			__m128i d = _mm_load_si128((__m128i*)(state3 + j));
+
+			__m128i aa = a, bb = b, cc = c, dd = d;
+		
+
+			//和上面一样
+			auto start = system_clock::now();
 			/* Round 1 */
 			FF_SIMD(a, b, c, d, x_vec[0], s11, 0xd76aa478);
 			FF_SIMD(d, a, b, c, x_vec[1], s12, 0xe8c7b756);
@@ -369,34 +376,39 @@ void SIMD_MD5o(vector<string>& inputs, const int inputs_n, bit32 **states,int si
 			II_SIMD(c, d, a, b, x_vec[2], s43, 0x2ad7d2bb);
 			II_SIMD(b, c, d, a, x_vec[9], s44, 0xeb86d391);
 
-           // 更新state
-           a = vaddq_u32(a, aa);
-           b = vaddq_u32(b, bb);
-           c = vaddq_u32(c, cc);
-           d = vaddq_u32(d, dd);
+			// 更新state
+			a = _mm_add_epi32(a, aa);
+			b = _mm_add_epi32(b, bb);
+			c = _mm_add_epi32(c, cc);
+			d = _mm_add_epi32(d, dd);
 
-           // 存储结果
-           vst1q_u32(state0 + j, a);
-           vst1q_u32(state1 + j, b);
-           vst1q_u32(state2 + j, c);
-           vst1q_u32(state3 + j, d);
-			     // 存储结果
-			     uint32x4_t s = { state0[j], state1[j], state2[j], state3[j] };
-	
-			     // reinterpret成u8类型，做byte swap
-			     uint8x16_t s_u8 = vreinterpretq_u8_u32(s);
-			     s_u8 = vrev32q_u8(s_u8); // 32-bit内的字节翻转
-	
-			     // 还原成u32类型
-			     uint32x4_t swapped = vreinterpretq_u32_u8(s_u8);
-	
-			     // 写回
-			     vst1q_u32(states[j], swapped);
-        }
-    }
-	
-    free(state0);
-    free(state1);
-    free(state2);
-    free(state3);
+			// 存回state0/1/2/3
+			_mm_store_si128((__m128i*)(state0 + j), a);
+			_mm_store_si128((__m128i*)(state1 + j), b);
+			_mm_store_si128((__m128i*)(state2 + j), c);
+			_mm_store_si128((__m128i*)(state3 + j), d);
+		
+			__m128i s = _mm_set_epi32(state3[j], state2[j], state1[j], state0[j]);
+		
+			// 手动小端字节翻转（每个 32位 int 内部字节反转）
+			__m128i swapped = _mm_or_si128(
+				_mm_or_si128(
+					_mm_srli_epi32(_mm_slli_epi32(s, 24), 24),      // 把最低字节移到最高
+					_mm_srli_epi32(_mm_slli_epi32(s, 8), 16)         // 把次低字节移到次高
+				),
+				_mm_or_si128(
+					_mm_slli_epi32(_mm_srli_epi32(s, 8), 16),        // 把次高字节移到次低
+					_mm_slli_epi32(_mm_srli_epi32(s, 24), 24)        // 把最高字节移到最低
+				)
+			);
+		
+			_mm_store_si128((__m128i*)(states[j]), swapped);
+		}
+	}
+
+	free(state0);
+	free(state1);
+	free(state2);
+	free(state3);
+
 }
