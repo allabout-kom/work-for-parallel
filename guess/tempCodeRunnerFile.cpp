@@ -1,1 +1,0 @@
-g++ main.cpp train.cpp guessing.cpp md5.cpp -o main
